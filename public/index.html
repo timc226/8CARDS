@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kongtrans 啤牌大對決</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0f2027; color: white; text-align: center; }
+        .card { display: inline-block; padding: 8px; border: 1px solid #ccc; border-radius: 5px; margin: 2px; background: white; color: black; font-weight: bold; width: 40px; }
+        .red { color: #e74c3c; }
+        .row-box { border: 2px dashed #3498db; min-height: 80px; margin: 10px auto; padding: 10px; width: 250px; border-radius: 10px; background: rgba(255,255,255,0.05); }
+        #results-board { background: #2c3e50; padding: 20px; border-radius: 15px; display: none; margin-top: 20px; }
+        .result-row { border-bottom: 1px solid #555; padding: 15px; display: flex; align-items: center; justify-content: center; gap: 20px; }
+        .deck-display { background: rgba(0,0,0,0.3); padding: 5px; border-radius: 5px; }
+        button { padding: 10px 25px; font-size: 16px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #2ecc71; }
+        button:disabled { background: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <h1>🧧 2026 馬年開牌大戰</h1>
+    <h3 id="status">請先加入遊戲</h3>
+
+    <div id="login">
+        <input type="text" id="username" placeholder="輸入玩家名字" style="padding: 10px;">
+        <button onclick="join()">加入</button>
+    </div>
+
+    <div id="game-room" style="display:none;">
+        <p>在線玩家: <span id="player-list"></span></p>
+        <button onclick="start()">洗牌派牌</button>
+        
+        <div style="margin: 20px;">
+            <h4>頭墩 (2隻)</h4><div id="row1" class="row-box" onclick="moveTo(1)"></div>
+            <h4>中墩 (3隻)</h4><div id="row2" class="row-box" onclick="moveTo(2)"></div>
+            <h4>尾墩 (3隻)</h4><div id="row3" class="row-box" onclick="moveTo(3)"></div>
+            <button id="submitBtn" onclick="submitHand()" disabled>排好，準備開牌！</button>
+        </div>
+
+        <hr>
+        <h3>你的手牌</h3>
+        <div id="hand" style="min-height: 100px;"></div>
+    </div>
+
+    <div id="results-board">
+        <h2>📢 全場開牌結果</h2>
+        <div id="result-list"></div>
+        <br>
+        <button onclick="location.reload()">再玩一場</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let myHand = [], rows = { 1: [], 2: [], 3: [] }, selected_idx = null;
+
+        function join() {
+            const name = document.getElementById('username').value;
+            if (name) {
+                socket.emit('join', name);
+                document.getElementById('login').style.display = 'none';
+                document.getElementById('game-room').style.display = 'block';
+            }
+        }
+
+        function start() { socket.emit('startGame'); }
+
+        socket.on('updatePlayers', list => document.getElementById('player-list').innerText = list.map(p => p.name).join(', '));
+        socket.on('gameStatus', msg => document.getElementById('status').innerText = msg);
+
+        socket.on('dealCards', hand => {
+            myHand = hand; rows = { 1: [], 2: [], 3: [] };
+            document.getElementById('results-board').style.display = 'none';
+            render();
+        });
+
+        function render() {
+            renderSection('hand', myHand, true);
+            renderSection('row1', rows[1]);
+            renderSection('row2', rows[2]);
+            renderSection('row3', rows[3]);
+            document.getElementById('submitBtn').disabled = (myHand.length > 0);
+        }
+
+        function renderSection(id, cards, isHand = false) {
+            const el = document.getElementById(id); el.innerHTML = '';
+            cards.forEach((c, idx) => {
+                const div = document.createElement('div');
+                div.className = `card ${(c.suit === '♥' || c.suit === '♦') ? 'red' : ''}`;
+                div.innerText = c.suit + c.value;
+                div.onclick = (e) => {
+                    e.stopPropagation();
+                    if (isHand) { selected_idx = idx; } 
+                    else { myHand.push(cards.splice(idx, 1)[0]); render(); }
+                };
+                el.appendChild(div);
+            });
+        }
+
+        function moveTo(rowNum) {
+            const limit = (rowNum === 1) ? 2 : 3;
+            if (selected_idx !== null && rows[rowNum].length < limit) {
+                rows[rowNum].push(myHand.splice(selected_idx, 1)[0]);
+                selected_idx = null; render();
+            }
+        }
+
+        function submitHand() {
+            socket.emit('submitRows', rows);
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('status').innerText = "已提交，等待其他人...";
+        }
+
+        socket.on('revealCards', allPlayers => {
+            document.getElementById('results-board').style.display = 'block';
+            const listEl = document.getElementById('result-list');
+            listEl.innerHTML = '';
+
+            allPlayers.forEach(p => {
+                const div = document.createElement('div');
+                div.className = 'result-row';
+                div.innerHTML = `<strong>${p.name}</strong>`;
+                
+                [1, 2, 3].forEach(rowNum => {
+                    const deckDiv = document.createElement('div');
+                    deckDiv.className = 'deck-display';
+                    p.rows[rowNum].forEach(c => {
+                        const cSpan = document.createElement('span');
+                        cSpan.className = `card ${(c.suit === '♥' || c.suit === '♦') ? 'red' : ''}`;
+                        cSpan.innerText = c.suit + c.value;
+                        deckDiv.appendChild(cSpan);
+                    });
+                    div.appendChild(deckDiv);
+                });
+                listEl.appendChild(div);
+            });
+        });
+    </script>
+</body>
+</html>
